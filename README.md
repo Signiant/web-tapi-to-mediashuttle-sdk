@@ -1,8 +1,5 @@
----
-title: Migrating from Web Transfer API to Media Shuttle SDK
-date: "2021-07-21"
-slug: /media-shuttle/migrating-web-transfer-api-to-media-shuttle-sdk
----
+# Migrating from Web Transfer API to Media Shuttle SDK
+
 
 ## Introduction
 
