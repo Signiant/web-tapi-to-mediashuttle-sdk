@@ -1,361 +1,424 @@
+# Migrating from Web Transfer API to Media Shuttle SDK
+
 
 ## Introduction
 
-Unlike Signiant Web Transfer API (aka TAPI), MediaShuttle SDK is not provided as a JavaScript file to use in HTML within \<script\> tag. MediaShuttle SDK is a Javascript/Typescript module. We recommend Webpack to bundle the SDK, your application Javascript/Typescript code using it and any additional third-party modules you use, into a single Javascript output file which can be loaded it into HTML with a \<script\> tag. For more information about the SDK and how to get started with it and webpack, please refer to the [doc](https://github.com/Signiant/developer-portal/blob/main/docs/mediashuttle/getting-started-ms-sdk.md)
+The Media Shuttle SDK supports accelerated file transfers for modern JavaScript frameworks as an [npm module](https://www.npmjs.com/package/@signiant/media-shuttle-sdk). The Media Shuttle SDK supersedes the Web Transfer API (Web TAPI) JavaScript library that is no longer available, and it is recommended that any existing applications should migrate to the updated module to ensure continuity of support and additional functionality.
 
+For more information about the SDK and how to get started with the Media Shuttle SDK, see the [SDK Documentation](https://github.com/Signiant/developer-portal/blob/main/docs/mediashuttle/getting-started-ms-sdk.md).
 
 ## Differences
 
-### Authentication
+Updating to the Media Shuttle SDK requires significant modification to your application to work with the new entry point, transfer objects and functions, and authentication requirements.
 
-Web TAPI uses an API key (from https://developer.mediashuttle.com), a server address (eg. 'api-transfers.developer.mediashuttle.com'), a user name, a password and a trust certificate in order to establish authentication.
+Web TAPI uses an API key from the [Transfer API Key Manager](https://developer.mediashuttle.com), a transfer server address, user name, password and trust certificate in order to establish authentication and
+transfer content. Media Shuttle SDK requires a user name, password and a Media Shuttle account name and portal name.
 
-MediaShuttleSDK requires a user name, a password and a MediaShuttle. Using this information, it will authenticate and retrieve the right account and portal information needed to perform a transfer.
-
-### Entry point
-
-Signiant.Mst
-
-vs
-
-MediaShuttleResourceFactory
-
-### Transfer object
-
-new Signiant.Mst.Upload()
-
-vs
-
-MediaShuttleResourceFactory.generateUpload(options)
-
-### Detect Signiant
-
-MediaShuttle SDK doesn't have any explicit mechanism to detect Signiant and offer installation as Web API does. However, once the MediaShuttleResourceFactory is created, one can register for events .
+**Note**: The Media Shuttle SDK does not automatically detect the Signiant App, and does not provide [app-less transfer](https://help.signiant.com/media-shuttle/signiant-app/transferring-without-signiant-app) functionality.
 
 
-## Steps
-
-For this guide, we will use a sample application (local_storage.html) which uses TAPI to upload files to the local storage configured with the M+A. The purpose of this guide is provide tips and instructions on how to migrate this code into an application leveraging MediaShuttle SDK, and upload to a MediaShuttle portal configured with the same storage used with the M+A setup.
-
-At the end of this guide, we will have a local_storage_migrated.html file which will perform uploads using MediaShuttle SDK to the MediaShuttle portal attached to the storage.
-
-### Prerequisites
-
-Please refer to the [doc](https://github.com/Signiant/developer-portal/blob/main/docs/mediashuttle/getting-started-ms-sdk.md) to get the toolchain installed for developing with MediaShuttle SDK.
-
-Moreover, please ask your portal administrator to provide you the following :
-<ul>
-<li> a MediaShuttle account (<b>accountName</b>)</li>
-<li> a MediaShuttle user name and password (<b>userName</b> and <b>password</b>)</li>
-<li> a MediaShuttle portal (<b>portalName</b>) configured to read/write to the same storage used for the M+A setup or to a storage you intend to use for this migration</li>
-<li> a destination folder path (<b>destinationFolderPath</b>) to write on the MediaShuttle storage. Default path is '/'. </li>
-</ul>
-
-### Copy and rename HTML and JS files
-
-Create a folder for the migration (tapi-migration).
-
-```
-mkdir tapi-migration
-cd tapi-migration
-```
-
-
-Copy the local_storage.html into it. Make a copy of local_storage.html to local_storage_migrated.html.
-
-```
-cp local_storage.html local_storage_migrated.html
-```
-
-All the changes will be done in local_storage_migrated.html.
-
-### Install Signiant MediaShuttle SDK module and bundle it for HTML
-
-1. Create a ms-sdk folder
-
-```
-mkdir ms-sdk; cd ms-sdk
-```
-2. Install webpack and confgure webpack
-
-```
-npm install webpack webpack-cli webpack-dev-server --save-dev
-```
-and add a webpack.config.js file as follows
-
-```
-const path = require('path');
-var webpack = require('webpack');
-
-module.exports = {
-  entry: './src/index.js',
-  mode: 'none',
-  output: {
-    filename: 'mediashuttle-bundle.js',
-    path: path.resolve(__dirname, '..'),
-  },
-};
-
-```
-This config will use the script in ./src/index.js and create a bundle at ../mediashuttle-bundle.js
-
-3. Install MS SDK module
-
-```
-npm install @signiant/media-shuttle-sdk
-```  
-
-4. Create and edit a script to expose MediaShuttle SDK as bundle
-
-```
-mkdir src; vi src/index.js
-```
-
-src/index.js mainly exposes functions to initialize MediaShuttleResourceFactory, to get portal options needed for transfer and to get an upload object (please note that the process is similar to get a download object).
-
-```
-window.initializeMSObject = initializeMSObject
-window.getPortalOptions = getPortalOptions
-window.stageUpload = stageUpload
-window.createUploadObject = createUploadObject
-```
-
-The full code of src/index.js is here
-
-```
-import * as MediaShuttleSDK from '@signiant/media-shuttle-sdk';
-
-function initializeMSObject(userName, password) {
-  let creds = new MediaShuttleSDK.LoginCredentials({
-                username: userName,
-                password: password
-              })
-  return new MediaShuttleSDK.MediaShuttleResourceFactory(
-    creds,
-        {
-          platformApiEndpoint: "https://platform-api-service.services.cloud.signiant.com",
-          messagingServiceUrl: "https://messaging-config-service.services.cloud.signiant.com"
-        }
-      );
-}
-
-function getPortalOptions(mediaShuttleResourceFactory, accountName, portalName) {
-  return mediaShuttleResourceFactory.getExplorer().listAccounts(true)
-  .then((resp => {
-    const acct = resp.mediaShuttleAccounts.find(item => item.name === accountName);
-    if (typeof(acct) === 'undefined') {
-      console.log("Returning undefined acct")
-      return undefined
-    }
-    return acct
-  }))
-  .then((acct => {
-    let accountId = acct.accountId
-    let serviceId = acct.serviceId
-    // Return new promise
-    return new Promise(function(resolve, reject) {
-      mediaShuttleResourceFactory.getExplorer().listPortals({
-                    accountId: accountId,
-                    serviceId: serviceId,
-                }).then(portals => {
-                  resolve({
-                    acct: acct,
-                    portals: portals
-                  })
-                })
-    })
-  }))
-  .then((res => {
-            console.log(res.portals)
-            const sharePortal = res.portals.find(portal => (portal.type === "Share" && portal.name === portalName));
-            console.log(sharePortal)
-            if (typeof(sharePortal) === 'undefined') {
-              console.log("Returning undefined portal")
-              return undefined
-            }
-            let portalToUse = sharePortal
-            let portalId = portalToUse.portalId
-            return {
-                portalId: portalId,
-                serviceId: res.acct.serviceId,
-                accountId: res.acct.accountId,
-            }
-    }));
-}
-
-function createUploadObject(mediaShuttleResourceFactory, portalOptions, destinationFolderPath) {
-  let uploadOptions = {}
-  uploadOptions.portalId = portalOptions.portalId
-  uploadOptions.serviceId = portalOptions.serviceId
-  uploadOptions.accountId = portalOptions.accountId
-  uploadOptions.force = true
-  uploadOptions.destinationPath = destinationFolderPath
-  return mediaShuttleResourceFactory.generateUpload(uploadOptions)
-    .then((uploader) => {return uploader})
-    .catch((err) => {return undefined});
-}
-
-function stageUpload(uploader, callback) {
-  // open a file selector and add files to the uploader
-  uploader.addFiles().then (files => {
-    console.log(JSON.stringify(files));
-    // start uploading the selected files through the callback function
-    callback(undefined, files)
-  });
-}
-
-window.initializeMSObject = initializeMSObject
-window.getPortalOptions = getPortalOptions
-window.stageUpload = stageUpload
-window.createUploadObject = createUploadObject
-
-```
+<table>
+  <th></th>
+  <th>Web Transfer API</th>
+  <th>Media Shuttle SDK</th>
+  <tr>
+    <td class="comparison">Entry Point</td>
+    <td class="comparison">
+      <code class="prettyprint">Signiant.Mst</code>
+    </td>
+    <td class="comparison">
+      <code class="prettyprint">MediaShuttleResourceFactory</code>
+    </td>
+  </tr>
+  <tr>
+    <td class="comparison">Transfer Object</td>
+    <td class="comparison">
+      <code class="prettyprint">new&nbsp;Signiant.Mst.Upload()</code>
+    </td>
+    <td class="comparison">
+      <code class="prettyprint">
+        MediaShuttleResourceFactory.generateUpload(options)
+      </code>
+    </td>
+  </tr>
+  <tr>
+    <td class="comparison">Authentication Requirements</td>
+    <td class="comparison">
+      <code class="prettyprint">
+        apikey <br /> defaultServer <br /> userName <br /> password <br />{" "}
+        trustCertificate
+      </code>
+    </td>
+    <td class="comparison">
+      <code class="prettyprint">
+        userName <br /> password <br /> accountName <br />
+        portalName
+      </code>
+    </td>
+  </tr>
+  <tr>
+    <td class="comparison">Signiant App Detection</td>
+    <td class="comparison">Yes</td>
+    <td class="comparison">No</td>
+  </tr>
+  <tr>
+    <td class="comparison">Signiant App Required </td>
+    <td class="comparison">No</td>
+    <td class="comparison">Yes</td>
+  </tr>
+</table>
 
 
-Create the bundle by running
+## Migration Tutorial
 
+This tutorial will use an existing Web TAPI application to demonstrate how to convert a file transfer integration using the Media Shuttle SDK.
+
+To get started, **fork** and **clone** this repository which contains the following applications:
+
+- `local_storage.html` - a sample application using the **Web Transfer API** and a Flight Deck agent that will act as a starting point.
+- `local_storage_migrated.html` - a completed example application using the **Media Shuttle SDK** and a Media Shuttle Share portal.
+
+Both applications will upload content to an Amazon S3 bucket.
+
+The repository also includes a sample integration in the `ms-sdk` directory.
+
+### Requirements
+
+The [Getting Started documentation](https://github.com/Signiant/developer-portal/blob/main/docs/mediashuttle/getting-started-ms-sdk.md) outlines the requirements to use the Media Shuttle SDK.
+
+You will require the following account information:
+
+- The Media Shuttle account name (`accountName`)
+- Valid Media Shuttle account information `(userName` and `password`)
+- The destination Share Portal name (`portalName`)
+- The destination folder path (`destinationFolderPath`)
+
+**Note**: The destination folder path is set to the portal root by default.
+
+### Creating the Module
+
+1. Create a new folder for the migration and copy the `local_storage.html` example file from the `web-tapi-to-mediashuttle-sdk` repository into a working directory and navigate to the directory:
+
+   **Linux:**
+
+   ```bash
+   mkdir tapi-migration
+   cp /path/to/repository/web-tapi-to-mediashuttle-sdk/local_storage.html tapi-migration/local_storage.html
+   cd tapi-migration
+   ```
+
+   **Windows:**
+
+   ```bash
+   mkdir tapi-migration
+   copy /path/to/repository/web-tapi-to-mediashuttle-sdk/local_storage.html tapi-migration/local_storage.html
+   cd tapi-migration
+   ```
+
+2. In the `tapi-migration` folder, make a copy of `local_storage.html` with the file name `local_storage_migrated.html`.
+
+   **Linux:**
+
+   ```bash
+   cp local_storage.html local_storage_migrated.html
+   ```
+
+   **Windows:**
+
+   ```bash
+   copy local_storage.html local_storage_migrated.html
+   ```
+
+3. In the `tapi-migration` folder, create and navigate to a new folder called `ms-sdk`:
+
+   ```bash
+   mkdir ms-sdk
+   cd ms-sdk
+   ```
+
+4. Use npm to install the `webpack-cli` and `webpack-dev-server` modules:
+
+   ```bash
+   npm install webpack webpack-cli webpack-dev-server --save-dev
+   ```
+
+5. Create a `webpack.config.js` with the following content:
+
+   ```javascript
+   const path = require("path")
+   var webpack = require("webpack")
+
+   module.exports = {
+     entry: "./src/index.js",
+     mode: "none",
+     output: {
+       filename: "mediashuttle-bundle.js",
+       path: path.resolve(__dirname, ".."),
+     },
+   }
+   ```
+
+   The webpack configuration uses the `./src/index.js` script as the application entry point, and will create a bundle named `mediashuttle-bundle.js` in the parent folder once compiled.
+
+6. Use npm to install the Media Shuttle SDK module:
+
+   ```
+   npm install @signiant/media-shuttle-sdk
+   ```
+
+7. Create a `src` directory
+
+   ```
+   mkdir src
+   ```
+
+8. Create an `index.js` file in the `ms-sdk/src` folder and add the following code to the file:
+
+   ```javascript
+   import * as MediaShuttleSDK from "@signiant/media-shuttle-sdk"
+
+   function initializeMSObject(userName, password) {
+     let creds = new MediaShuttleSDK.LoginCredentials({
+       username: userName, // A valid user name must be included
+       password: password, // A valid password must be included
+     })
+     return new MediaShuttleSDK.MediaShuttleResourceFactory(creds, {
+       platformApiEndpoint:
+         "https://platform-api-service.services.cloud.signiant.com",
+       messagingServiceUrl:
+         "https://messaging-config-service.services.cloud.signiant.com",
+     })
+   }
+
+   function getPortalOptions(
+     mediaShuttleResourceFactory,
+     accountName,
+     portalName
+   ) {
+     return mediaShuttleResourceFactory
+       .getExplorer()
+       .listAccounts(true)
+       .then(resp => {
+         const acct = resp.mediaShuttleAccounts.find(
+           item => item.name === accountName
+         )
+         if (typeof acct === "undefined") {
+           console.log("Returning undefined acct")
+           return undefined
+         }
+         return acct
+       })
+       .then(acct => {
+         let accountId = acct.accountId
+         let serviceId = acct.serviceId
+         // Return new promise
+         return new Promise(function (resolve, reject) {
+           mediaShuttleResourceFactory
+             .getExplorer()
+             .listPortals({
+               accountId: accountId,
+               serviceId: serviceId,
+             })
+             .then(portals => {
+               resolve({
+                 acct: acct,
+                 portals: portals,
+               })
+             })
+         })
+       })
+       .then(res => {
+         console.log(res.portals)
+         const sharePortal = res.portals.find(
+           portal => portal.type === "Share" && portal.name === portalName
+         )
+         console.log(sharePortal)
+         if (typeof sharePortal === "undefined") {
+           console.log("Returning undefined portal")
+           return undefined
+         }
+         let portalToUse = sharePortal
+         let portalId = portalToUse.portalId
+         return {
+           portalId: portalId,
+           serviceId: res.acct.serviceId,
+           accountId: res.acct.accountId,
+         }
+       })
+   }
+
+   function createUploadObject(
+     mediaShuttleResourceFactory,
+     portalOptions,
+     destinationFolderPath
+   ) {
+     let uploadOptions = {}
+     uploadOptions.portalId = portalOptions.portalId
+     uploadOptions.serviceId = portalOptions.serviceId
+     uploadOptions.accountId = portalOptions.accountId
+     uploadOptions.force = true
+     uploadOptions.destinationPath = destinationFolderPath
+     return mediaShuttleResourceFactory
+       .generateUpload(uploadOptions)
+       .then(uploader => {
+         return uploader
+       })
+       .catch(err => {
+         return undefined
+       })
+   }
+
+   function stageUpload(uploader, callback) {
+     // open a file selector and add files to the uploader
+     uploader.addFiles().then(files => {
+       console.log(JSON.stringify(files))
+       // start uploading the selected files through the callback function
+       callback(undefined, files)
+     })
+   }
+
+   window.initializeMSObject = initializeMSObject
+   window.getPortalOptions = getPortalOptions
+   window.stageUpload = stageUpload
+   window.createUploadObject = createUploadObject
+   ```
+
+The `src/index.js` exposes functions to initialize `MediaShuttleResourceFactory`, to get portal options needed for transfer, and to get an upload object.
+
+### Compile the Module
+
+After completing the `index.js` example file, compile it as a module using npm:
 
 ```
 npm run build
-```  
-
-The ../mediashuttle-bundle.js file is created in folder tapi-migration (at the same level as file local_storage_migrated.html) and it exports the functions needed to proceed with the code migration.
-
-We are now ready to edit local_storage_migrated.html to complete the migration.
-
-
-### Replace scripts
-
-Replace all scripts imported for WebTAPI
-
-```
-<script src='https://updates.signiant.com/javascript-api/2.7.4/transferapi.min.js' type='text/javascript'></script>
 ```
 
-with the bundled script out of webpack
+The `mediashuttle-bundle.js` file is created in the `tapi-migration` folder, and is ready to use in the `local_storage_migrated.html` example file.
 
-```
-<script src='mediashuttle-bundle.js' type='text/javascript'></script>
-```
+### Implement New Script
 
+Replace all scripts imported for Web TAPI with the bundled script out of webpack:
+
+```diff-html
+- <script src='https://example.com/transfer-api/2.7.4/transferapi.min.js' type='text/javascript'></script>
++ <script src='https://example.com/path/to/library/mediashuttle-bundle.js' type='text/javascript'></script>
+```
 
 ### Replace authentication variables
 
-Replace all variables used by WebTAPI for authentication
+Replace all variables used by Web TAPI for authentication:
 
-```
-var apikey = '...';
-var defaultServer = '....';
-var userName = '....';
-var password = '....';
-var trustCertificate = '...'
-```
-with MediaShuttle SDK required variables
-
-```
-var userName = '....';
-var password = '....';
-var accountName = '.....';
-var portalName = '....';
+```diff-javascript
+- var apikey = '...';
+- var defaultServer = '....';
+- var userName = '....';
+- var password = '....';
+- var trustCertificate = '...'
++ var userName = '....';
++ var password = '....';
++ var accountName = '.....';
++ var portalName = '....';
 ```
 
 ### Replace/Add global transfer variables
 
-Replace the global transfer variable for upload used by WebTAPI
+Replace the global transfer variable for upload used by WebTAPI with the SDK transfer variables.
 
-```
-var transferObject = null;
-```
-with
-
-```
-var mediaShuttleResourceFactory = null;
-var transferObject = null;
-var portalOptions = null;
-var uploadOptions = null;
+```diff-javascript
+- var transferObject = null;
++ var mediaShuttleResourceFactory = null;
++ var transferObject = null;
++ var portalOptions = null;
++ var uploadOptions = null;
 ```
 
 ### Replace on page ready function
 
-In this demo, when the page is ready, function ``checkForSigniant`` is called to create the Signiant library, and then initialize the transfer object on success. For the migration, we will modify the implementation of that function to create the MediaShuttle SDK entry point (mediaShuttleResourceFactory), and fallback on error. This is achieved by leveraging the ``initializeMSObject`` and ``getPortalOptions`` exported by our bundle
+In this example, when the page is ready, the function `checkForSigniant` is called to create the Signiant library, and then initialize the transfer object when the call succeeds. When migrating the application, you must modify the implementation of that function to call the Media Shuttle SDK entry point, `mediaShuttleResourceFactory`, and fallback on error. This is achieved by leveraging the `initializeMSObject` and `getPortalOptions` functions included in the JavaScript bundle.
 
-
-```
+```javascript
 function checkForSigniant(failQuick) {
-  console.log("Check for Signiant App");
+  console.log("Check for Signiant App")
   mediaShuttleResourceFactory = initializeMSObject(userName, password)
   if (mediaShuttleResourceFactory == undefined) {
     appNotLoaded()
   } else {
-    let opts = getPortalOptions(mediaShuttleResourceFactory, accountName, portalName)
+    let opts = getPortalOptions(
+      mediaShuttleResourceFactory,
+      accountName,
+      portalName
+    )
     const getOpts = () => {
-      opts.then((val) => {
-        console.log(val);
+      opts.then(val => {
+        console.log(val)
         if (val == undefined) {
           appNotLoaded()
         } else {
           portalOptions = val
         }
-      });
-    };
+      })
+    }
     getOpts()
   }
 }
 ```
 
-Note here that there is no support for prompting the user for installing the Signiant app if it is not available. There are other mechanisms available for that purpose which can be discussed with the Developer Experience team if you need. Reach out to your account manager to schedule a meeting.
+**Note**: The Media Shuttle SDK does not prompt the user to install the Signiant App if it is not automatically detected. If this is required for your application, reach out to the [Signiant Developer Experience Team](mailto:signiantdeveloperexperience@signiant.com) for more information.
 
-The next step in the demo was to create a transfer upload object through function ``function initializeUploadObject()``. We will reimplement that function by using the ``createUploadObject``function of the bundle. It becomes
+### Create a transfer upload object
 
-```
-function initializeUploadObject(){
+Using the following code sample, create a transfer upload object through the `initializeUploadObject()` function. We will implement the function in the application by using the `createUploadObject` function included in the new library:
+
+```javascript
+function initializeUploadObject() {
   //create a new upload Object
-  let promise = createUploadObject(mediaShuttleResourceFactory, portalOptions, destinationFolderPath)
+  let promise = createUploadObject(
+    mediaShuttleResourceFactory,
+    portalOptions,
+    destinationFolderPath
+  )
   const getTransferObject = () => {
-    promise.then((val) => {
-      console.log(val);
+    promise.then(val => {
+      console.log(val)
       if (val !== undefined) {
         transferObject = val
         console.log("Transfer object ", transferObject)
       }
-    });
-  };
+    })
+  }
   getTransferObject()
 }
 ```
 
-Now, with the transferObject, we can proceed by using the SDK as follows
+Add the following code to use the Media Shuttle SDK to select files:
 
-```
+```javascript
 function chooseFiles() {
   if (transferObject !== undefined) {
-    transferObject.addFiles().then (files => {
+    transferObject.addFiles().then(files => {
       // start uploading the selected files through the callback function
       callbackUpload(undefined, files)
-    });
+    })
     console.log("choose files: ", portalOptions)
   }
 }
-```
 
-and
-
-```
 /**
  * Callback when the file picker is closed.
  *
  * @return null
-*/
-var callbackUpload = function(event, selectedFiles) {
-  console.log(JSON.stringify(selectedFiles));
+ */
+
+var callbackUpload = function (event, selectedFiles) {
+  console.log(JSON.stringify(selectedFiles))
   if (transferObject !== undefined) {
-    transferObject.start();
+    transferObject.start()
     //modify the UI
-    $("#contentUploadText").html("Starting upload...");
-    $("#contentListing").fadeTo(1000, 0.3);
-    $("#contentUpload").on('click', cancelUpload);
+    $("#contentUploadText").html("Starting upload...")
+    $("#contentListing").fadeTo(1000, 0.3)
+    $("#contentUpload").on("click", cancelUpload)
   }
 }
 ```
 
-This sample comments out the file progress and events handling.
+**Note**: This sample application does not include the file progress and events handling.
